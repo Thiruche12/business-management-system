@@ -1,0 +1,60 @@
+services:
+  db:
+    image: mariadb:11.4
+    restart: on-failure
+    environment:
+      MARIADB_ROOT_PASSWORD: local-root-only
+      MARIADB_DATABASE: business_management_system
+      MARIADB_USER: bms
+      MARIADB_PASSWORD: local-bms-only
+    volumes:
+      - bms_data:/var/lib/mysql
+      - ./script.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping --host=localhost --user=bms --password=local-bms-only --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  seed:
+    build:
+      context: .
+      dockerfile: Dockerfile.base44
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment: &db_env
+      DB_HOST: db
+      DB_NAME: business_management_system
+      DB_USER: bms
+      DB_PASSWORD: local-bms-only
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["php", ".base44/seed.php"]
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.base44
+    restart: on-failure
+    working_dir: /app
+    volumes:
+      - .:/app
+    environment: *db_env
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    command: ["php", "-S", "0.0.0.0:3000", "-t", "/app"]
+    healthcheck:
+      test: ["CMD", "php", "-r", "$$body = @file_get_contents('http://127.0.0.1:3000/login.php'); exit($$body !== false && str_contains($$body, 'Business Management System') ? 0 : 1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  bms_data:
